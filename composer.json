@@ -1,0 +1,29 @@
+{
+    "name": "basttyy/fx-hist-downloader",
+    "description": "library for downloading fx historical data",
+    "type": "project",
+    "require": {
+        "react/http": "^1.8",
+        "react/filesystem": "^0.2@dev",
+        "clue/zlib-react": "^1.1",
+        "clue/stdio-react": "^2.6",
+        "clue/mq-react": "^1.5",
+        "knplabs/github-api": "^3.0",
+        "guzzlehttp/guzzle": "^7.0.1",
+        "http-interop/http-factory-guzzle": "^1.0",
+        "react/async": "^4.0"
+    },
+    "license": "MIT",
+    "autoload": {
+        "psr-4": {
+            "Basttyy\\FxHistDownloader\\": "src/"
+        }
+    },
+    "authors": [
+        {
+            "name": "Mamman Abdulbasit",
+            "email": "basttyy@gmail.com"
+        }
+    ],
+    "minimum-stability": "alpha"
+}
