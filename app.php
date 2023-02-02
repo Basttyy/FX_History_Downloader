@@ -1,54 +1,73 @@
 <?php
+ini_set('memory_limit', '4000M');
+ini_set("default_socket_timeout", 999999999);
+ini_set('max_execution_time', 999999999);
 
 require_once "./vendor/autoload.php";
 require_once "./helpers.php";
 
 use Github\Api\Repository\Releases;
-use Psr\Http\Message\ResponseInterface;
+use GuzzleHttp\Exception\RequestException;
+use GuzzleHttp\Exception\TransferException;
+use Monolog\Level;
+use Monolog\Logger;
+use Monolog\Handler\StreamHandler;
 
 $dest_fxt_folder = isset($argv[1]) ? $argv[1] : __DIR__."\\downloads\\fxt\\";
 $dest_hst_folder = isset($argv[2]) ? $argv[2] : __DIR__."\\downloads\\hst\\";
 $temp_folder = isset($argv[3]) ? $argv[3] : __DIR__."\\downloads\\temp\\";
-$buffer_size = 4096;
 
-// $repositories = $client->api('user')->repositories('ornicar');
-// var_dump($repositories);
+$logger = new Logger('logger');
+$logger->pushHandler(new StreamHandler(__DIR__.'\\app.log', Level::Debug));
+$buffer_size = 4096;
 
 foreach ($pairs as $pair => $years) {
     // echo $pair.PHP_EOL;
     // print_r($years);
-    $releases = getReleases($gh_repo, $pair);
+    $releases = getReleases($gh_repo, $logger, $pair);
     
     foreach ($releases as $release) {
         if (!in_array($release['name'], $years)) {
             continue;
         }
         
-        if (!setupFolders($temp_folder, $dest_fxt_folder.'\\'.$release['name'], $dest_hst_folder.'\\'.$release['name'])) {
+        if (!setupFolders($temp_folder, $dest_fxt_folder.$pair.'\\'.$release['name'], $dest_hst_folder.$pair.'\\'.$release['name'])) {
+            $logger->error('could not create working folders/directories');
             throw new \UnexpectedValueException('Could not create working folders/directories');
         }
 
-        getReleaseAssets($release, $temp_folder, $dest_fxt_folder, $dest_hst_folder, $on_progress);
+        getReleaseAssets($release, $pair, $temp_folder, $dest_fxt_folder, $dest_hst_folder, $on_progress, $logger);
     }
 }
-exit(0);
 
-function getReleaseAssets(array $release, string $temp_folder, string $dest_fxt_folder, string $dest_hst_folder, Closure $on_progress) {
+function getReleaseAssets(array $release, string $pair, string $temp_folder, string $dest_fxt_folder, string $dest_hst_folder, Closure $on_progress, Logger $logger) {
     $i = 1;
 
     foreach ($release['assets'] as $asset) {  //loop through a release assets
         echo "Loop $i".PHP_EOL;
-        if ($i >= 4)
-            break;
-        if ($i < 3) {
-            $i++;
+        // if ($i >= 4)
+        //     break;
+        // if ($i < 3) {
+        //     $i++;
+        //     continue;
+        // }
+        
+        
+        if (fileExists($asset, $dest_fxt_folder, $dest_hst_folder, $pair, $release['name'])) {
+            echo $release['name']. strstr($asset['name'], '.gz', true) . " found".PHP_EOL;
             continue;
         }
-        if (performDownloads($asset, $temp_folder, $on_progress)) {
-            performExtraction($asset, $release['name'], $temp_folder, $dest_fxt_folder, $dest_hst_folder);
+
+        if (performDownloads($asset, $temp_folder, $logger, $on_progress)) {
+            performExtraction($asset, $pair, $release['name'], $temp_folder, $dest_fxt_folder, $dest_hst_folder, $logger);
         }
         $i++;
     }
+}
+
+function fileExists(array $asset, string $dest_fxt_folder, string $dest_hst_folder, string $pair, string $release_name) {
+    $path = strpos($asset['name'], 'fxt') !== false ? $dest_fxt_folder. $pair .'\\' .$release_name.'\\' . $release_name . strstr($asset['name'], '.gz', true) : $dest_hst_folder. $pair .'\\' .$release_name.'\\' . $release_name . strstr($asset['name'], '.gz', true);
+    return file_exists($path);
 }
 
 function setupFolders($temp_folder, $dest_fxt_folder, $dest_hst_folder) {
@@ -65,7 +84,7 @@ function createDir(string $dir) {
     return true;
 }
 
-function getReleases(string $gh_repo, string $pair = "EURUSD"): bool|array {
+function getReleases(string $gh_repo, Logger $logger, string $pair = "EURUSD"): bool|array {
     try {
         $gh_client = new \Github\Client();
         
@@ -84,6 +103,7 @@ function getReleases(string $gh_repo, string $pair = "EURUSD"): bool|array {
         // }
         return $releases;
     } catch (Exception $e) {
+        $logger->error($e->getMessage(), $e->getTrace());
         echo $e->getMessage().' '.$e->getCode();
         return false;
     }
@@ -91,16 +111,18 @@ function getReleases(string $gh_repo, string $pair = "EURUSD"): bool|array {
 
 $prev_down_bytes = $prev_up_bytes = 0;
 
-function performExtraction(array $asset, string $release_name, string $temp_folder, string $dest_fxt_folder, string $dest_hst_folder) {
+function performExtraction(array $asset, string $pair, string $release_name, string $temp_folder, string $dest_fxt_folder, string $dest_hst_folder, Logger $logger) {
     // open the gzip file
     $gz = gzopen($temp_folder . $asset['name'], 'rb');
     if (!$gz) {
-        throw new \UnexpectedValueException('Could not open gzip file');
+        $logger->error('could not open gzip file');
+        throw new \UnexpectedValueException('Could not open gzip file'.PHP_EOL);
     }
     // open the destination file
-    $dest = strpos($asset['name'], 'fxt') !== false ? fopen($dest_fxt_folder .$release_name.'\\' . $release_name . strstr($asset['name'], '.gz', true), 'wb') : fopen($dest_hst_folder .$release_name.'\\' . $release_name . strstr($asset['name'], '.gz', true), 'wb');
+    $dest = strpos($asset['name'], 'fxt') !== false ? fopen($dest_fxt_folder. $pair .'\\' .$release_name.'\\' . $release_name . strstr($asset['name'], '.gz', true), 'wb') : fopen($dest_hst_folder. $pair .'\\' .$release_name.'\\' . $release_name . strstr($asset['name'], '.gz', true), 'wb');
     if (!$dest) {
         gzclose($gz);
+        $logger->error('could not open destination file');
         throw new \UnexpectedValueException('Could not open destination file'.PHP_EOL);
     }
     
@@ -119,6 +141,7 @@ function performExtraction(array $asset, string $release_name, string $temp_fold
     $stat = unlink($temp_folder . $asset['name']);
     sleep(2);
     if (!$stat) {
+        $logger->warning("$gz cannot be deleted due to an error");
         echo ("$gz cannot be deleted due to an error".PHP_EOL);
     }
     else {
@@ -126,23 +149,40 @@ function performExtraction(array $asset, string $release_name, string $temp_fold
     }
 };
 
-function performDownloads(array $asset, string $temp_folder, Closure $onProgress) {
-    $http_client = new GuzzleHttp\Client();
+function performDownloads(array $asset, string $temp_folder, Logger $logger, Closure $onProgress) {
+    try {
+        $http_client = new GuzzleHttp\Client();
 
-    $i = 1;
-    $response = $http_client->request('GET', $asset['browser_download_url'], [
-        'headers'        => ['Accept-Encoding' => 'gzip'],
-        'decode_content' => false,
-        'sink' => $temp_folder . $asset['name'],
-        'progress' => $onProgress
-    ]);
-    $code = $response->getStatusCode();
-    echo "response is: $code".PHP_EOL;
+        $i = 1;
+        $response = $http_client->request('GET', $asset['browser_download_url'], [
+            'version' => 1.0,
+            'headers'        => ['Accept-Encoding' => 'gzip, deflate'],
+            'decode_content' => false,
+            'sink' => $temp_folder . $asset['name'],
+            'progress' => $onProgress
+        ]);
+        $code = $response->getStatusCode();
+        echo "response is: $code".PHP_EOL;
 
-    if ($code > 199 && $code < 300) {   //only if file was successfully downloaded
-        return true;
-    } else {
-        return false;
+        if ($code > 199 && $code < 300) {   //only if file was successfully downloaded
+            return true;
+        } else {
+            return false;
+        }
+    } catch (Exception $e) {
+        if ($e instanceof RequestException || $e instanceof TransferException) {
+            $message = $e->getMessage(); $name = $asset['name'];
+            $logger->error($message, $e->getTrace());
+            echo "got error `$message` while downloading file $name".PHP_EOL;
+            echo "retrying in 10 seconds".PHP_EOL;
+            sleep(10);
+            performDownloads($asset, $temp_folder, $logger, $onProgress);
+        } else if ($e instanceof GuzzleHttp\Exception\ConnectException || $e instanceof GuzzleHttp\Exception\TooManyRedirectsException || $e instanceof GuzzleHttp\Exception\ClientException) {
+            $message = $e->getMessage(); $name = $asset['name'];
+            $logger->error($message, $e->getTrace());
+            echo "got error `$message` while downloading file $name".PHP_EOL;
+            exit (1);
+        }
     }
 };
 

@@ -11,7 +11,8 @@
         "knplabs/github-api": "^3.0",
         "guzzlehttp/guzzle": "^7.0.1",
         "http-interop/http-factory-guzzle": "^1.0",
-        "react/async": "^4.0"
+        "react/async": "^4.0",
+        "monolog/monolog": "^3.2"
     },
     "license": "MIT",
     "autoload": {
